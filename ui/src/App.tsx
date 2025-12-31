@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Mode, Symbol, spin } from "@engine/index";
 import type { GameConfig, WeightedCdfEntry, Weights } from "@math/index";
 import type { PayTable } from "@math/payTable";
@@ -94,6 +94,22 @@ const config: GameConfig = {
   mode: Mode.BASE,
 };
 
+const iconMap: Record<Symbol, string> = {
+  [Symbol.L1]: new URL("./symbols/L1.svg", import.meta.url).href,
+  [Symbol.L2]: new URL("./symbols/L2.svg", import.meta.url).href,
+  [Symbol.L3]: new URL("./symbols/L3.svg", import.meta.url).href,
+  [Symbol.L4]: new URL("./symbols/L4.svg", import.meta.url).href,
+  [Symbol.M1]: new URL("./symbols/M1.svg", import.meta.url).href,
+  [Symbol.M2]: new URL("./symbols/M2.svg", import.meta.url).href,
+  [Symbol.M3]: new URL("./symbols/M3.svg", import.meta.url).href,
+  [Symbol.M4]: new URL("./symbols/M4.svg", import.meta.url).href,
+  [Symbol.H1]: new URL("./symbols/H1.svg", import.meta.url).href,
+  [Symbol.H2]: new URL("./symbols/H2.svg", import.meta.url).href,
+  [Symbol.WILD]: new URL("./symbols/WILD.svg", import.meta.url).href,
+  [Symbol.SCATTER]: new URL("./symbols/SCATTER.svg", import.meta.url).href,
+  [Symbol.EMPTY]: new URL("./symbols/EMPTY.svg", import.meta.url).href,
+};
+
 const symbolClass = (sym: Symbol) => {
   switch (sym) {
     case Symbol.L1:
@@ -134,83 +150,178 @@ export default function App() {
   const rng = useMemo(() => DeterministicRng.seeded(seed), [seed]);
   const [outcome, setOutcome] = useState(() => spin(1, rng, config));
   const [stepIndex, setStepIndex] = useState(0);
+  const [displayGrid, setDisplayGrid] = useState(() => outcome.transcript.initialGrid);
+  const [highlightSet, setHighlightSet] = useState<Set<string> | undefined>(undefined);
+  const [displayMult, setDisplayMult] = useState(() =>
+    createMultiplierGrid(config.rows, config.cols, 1),
+  );
+  const [isSpinning, setIsSpinning] = useState(false);
+  const timersRef = useRef<number[]>([]);
+  const intervalRef = useRef<number | undefined>(undefined);
 
   const transcript = outcome.transcript;
   const grid = transcript.initialGrid;
   const step = transcript.cascades[stepIndex];
+  const payoutFormula = step ? buildPayoutFormula(step) : null;
+
+  useEffect(() => {
+    for (const id of timersRef.current) {
+      window.clearTimeout(id);
+    }
+    timersRef.current = [];
+    if (intervalRef.current) {
+      window.clearInterval(intervalRef.current);
+      intervalRef.current = undefined;
+    }
+    setDisplayGrid(transcript.initialGrid);
+    setHighlightSet(undefined);
+    setDisplayMult(createMultiplierGrid(config.rows, config.cols, 1));
+    if (transcript.cascades.length === 0) {
+      setIsSpinning(false);
+      return;
+    }
+    setIsSpinning(true);
+    intervalRef.current = window.setInterval(() => {
+      setDisplayGrid(randomGrid(config.rows, config.cols));
+      setDisplayMult(createMultiplierGrid(config.rows, config.cols, 1));
+    }, 80);
+    const preSpinDuration = 520;
+    let delay = preSpinDuration;
+    transcript.cascades.forEach((cascade) => {
+      const mark = new Set(cascade.removed.map((c) => `${c.r},${c.c}`));
+      timersRef.current.push(
+        window.setTimeout(() => {
+          setHighlightSet(mark);
+        }, delay),
+      );
+      delay += 250;
+      timersRef.current.push(
+        window.setTimeout(() => {
+          setDisplayGrid(cascade.gridAfter);
+          if (cascade.multiplierGrid) {
+            setDisplayMult(cascade.multiplierGrid);
+          }
+          setHighlightSet(undefined);
+        }, delay),
+      );
+      delay += 250;
+    });
+    timersRef.current.push(
+      window.setTimeout(() => {
+        setIsSpinning(false);
+      }, delay),
+    );
+    timersRef.current.push(
+      window.setTimeout(() => {
+        if (intervalRef.current) {
+          window.clearInterval(intervalRef.current);
+          intervalRef.current = undefined;
+        }
+        setDisplayGrid(transcript.initialGrid);
+      }, preSpinDuration),
+    );
+  }, [transcript]);
 
   return (
-    <div className="app">
-      <div className="panel">
-        <div className="header">
-          <div className="title">Slot Engine</div>
-          <div className="subtitle">React replay of spin transcript</div>
-        </div>
-        <GridView grid={grid} />
+    <div className="scene">
+      <div className="marquee">
+        <div className="brand">Neon Cluster</div>
+        <div className="subtitle">8x8 Cascading Slot</div>
       </div>
-      <div className="panel controls">
-        <button
-          onClick={() => {
-            const nextSeed = seedFromTime();
-            setSeed(nextSeed);
-            const nextRng = DeterministicRng.seeded(nextSeed);
-            setOutcome(spin(1, nextRng, config));
-            setStepIndex(0);
-          }}
-        >
-          Spin
-        </button>
-        <div className="cascade">
-          <div className="subtitle">Cascades</div>
-          <div className="cascade-nav">
-            <button
-              disabled={stepIndex === 0}
-              onClick={() => setStepIndex((i) => Math.max(0, i - 1))}
-            >
-              Prev
-            </button>
-            <div className="cascade-count">
-              {transcript.cascades.length === 0
-                ? "0 / 0"
-                : `${stepIndex + 1} / ${transcript.cascades.length}`}
+      <div className="machine">
+        <div className="machine-frame">
+          <div className="meter">
+            <div className="meter-block">
+              <div className="meter-label">Total Win</div>
+              <div className="meter-value">{outcome.result.totalWinX.toFixed(2)}x</div>
             </div>
-            <button
-              disabled={stepIndex >= transcript.cascades.length - 1}
-              onClick={() =>
-                setStepIndex((i) =>
-                  Math.min(transcript.cascades.length - 1, i + 1),
-                )
-              }
-            >
-              Next
-            </button>
+            <div className="meter-block">
+              <div className="meter-label">Base</div>
+              <div className="meter-value">{outcome.result.baseWinX.toFixed(2)}x</div>
+            </div>
+            <div className="meter-block">
+              <div className="meter-label">Bonus</div>
+              <div className="meter-value">{outcome.result.bonusWinX.toFixed(2)}x</div>
+            </div>
+            <div className="meter-block">
+              <div className="meter-label">Bonus Spins</div>
+              <div className="meter-value">{outcome.result.bonusSpinsPlayed}</div>
+            </div>
           </div>
-          {step ? (
-            <div className="cascade-grid">
-              <GridView
-                grid={step.gridAfter}
-                highlights={new Set(step.removed.map((c) => `${c.r},${c.c}`))}
-              />
+          <div className={`reel-window${isSpinning ? " spinning" : ""}`}>
+            <GridView
+              grid={displayGrid}
+              highlights={highlightSet}
+              multGrid={displayMult}
+            />
+            <div className={`payout-ribbon${payoutFormula ? " show" : ""}`}>
+              {payoutFormula ? payoutFormula : "No win this spin"}
             </div>
-          ) : (
-            <div className="empty-state">No wins this spin</div>
-          )}
+          </div>
+          <div className="control-bar">
+            <button
+              className="spin-button"
+              disabled={isSpinning}
+              onClick={() => {
+                const nextSeed = seedFromTime();
+                setSeed(nextSeed);
+                const nextRng = DeterministicRng.seeded(nextSeed);
+                setOutcome(spin(1, nextRng, config));
+                setStepIndex(0);
+              }}
+            >
+              Spin
+            </button>
+            <div className="meter-mini">
+              <div>Hit Rate Target: 20-40%</div>
+              <div>Bonus Freq Target: ~0.4%</div>
+            </div>
+          </div>
         </div>
-        <div className="stats">
-          <div className="stat">
-            Total Win<span>{outcome.result.totalWinX.toFixed(2)}x</span>
+        <div className="side-panel">
+          <div className="panel-title">Cascade Replay</div>
+          <div className="cascade">
+            <div className="cascade-nav">
+              <button
+                disabled={stepIndex === 0}
+                onClick={() => setStepIndex((i) => Math.max(0, i - 1))}
+              >
+                Prev
+              </button>
+              <div className="cascade-count">
+                {transcript.cascades.length === 0
+                  ? "0 / 0"
+                  : `${stepIndex + 1} / ${transcript.cascades.length}`}
+              </div>
+              <button
+                disabled={stepIndex >= transcript.cascades.length - 1}
+                onClick={() =>
+                  setStepIndex((i) =>
+                    Math.min(transcript.cascades.length - 1, i + 1),
+                  )
+                }
+              >
+                Next
+              </button>
+            </div>
+            {step ? (
+              <div className="cascade-grid">
+                <GridView
+                  grid={step.gridAfter}
+                  highlights={new Set(step.removed.map((c) => `${c.r},${c.c}`))}
+                />
+              </div>
+            ) : (
+              <div className="empty-state">No wins this spin</div>
+            )}
           </div>
-          <div className="stat">
-            Base Win<span>{outcome.result.baseWinX.toFixed(2)}x</span>
-          </div>
-          <div className="stat">
-            Bonus Win<span>{outcome.result.bonusWinX.toFixed(2)}x</span>
-          </div>
-          <div className="stat">
-            Bonus Spins<span>{outcome.result.bonusSpinsPlayed}</span>
-          </div>
-          <div className="stat">
-            Cap Hit<span>{outcome.result.capHit ? "yes" : "no"}</span>
+          <div className="stats">
+            <div className="stat">
+              Cap Hit<span>{outcome.result.capHit ? "yes" : "no"}</span>
+            </div>
+            <div className="stat">
+              Seed<span>{seed}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -221,9 +332,11 @@ export default function App() {
 function GridView({
   grid,
   highlights,
+  multGrid,
 }: {
   grid: Symbol[][];
   highlights?: Set<string>;
+  multGrid?: number[][];
 }) {
   return (
     <div className="grid">
@@ -231,16 +344,62 @@ function GridView({
         row.map((cell, cIdx) => {
           const key = `${rIdx}-${cIdx}`;
           const marked = highlights?.has(`${rIdx},${cIdx}`);
+          const mult = multGrid?.[rIdx]?.[cIdx] ?? 1;
           return (
             <div
               key={key}
               className={`${symbolClass(cell)}${marked ? " marked" : ""}`}
             >
-              {cell}
+              <div className="cell-content">
+                <img className="cell-icon" src={iconMap[cell]} alt={cell} />
+                <div className="cell-label">{cell}</div>
+                <div className="cell-mult">x{mult}</div>
+              </div>
             </div>
           );
         }),
       )}
     </div>
   );
+}
+
+function createMultiplierGrid(rows: number, cols: number, value: number): number[][] {
+  return Array.from({ length: rows }, () =>
+    Array.from({ length: cols }, () => value),
+  );
+}
+
+function randomGrid(rows: number, cols: number): Symbol[][] {
+  const symbols = [
+    Symbol.L1,
+    Symbol.L2,
+    Symbol.L3,
+    Symbol.L4,
+    Symbol.M1,
+    Symbol.M2,
+    Symbol.M3,
+    Symbol.M4,
+    Symbol.H1,
+    Symbol.H2,
+    Symbol.WILD,
+    Symbol.SCATTER,
+  ];
+  return Array.from({ length: rows }, () =>
+    Array.from({ length: cols }, () => symbols[Math.floor(Math.random() * symbols.length)]),
+  );
+}
+
+function buildPayoutFormula(step: { clusters: { symbol: Symbol; size: number; cells: { r: number; c: number }[] }[]; multiplierGrid?: number[][] }): string | null {
+  const cluster = step.clusters[0];
+  if (!cluster) {
+    return null;
+  }
+  const basePay = payTable(cluster.symbol, cluster.size);
+  const mults = step.multiplierGrid
+    ? cluster.cells.map((c) => step.multiplierGrid?.[c.r]?.[c.c] ?? 1)
+    : [];
+  const shown = mults.slice(0, 6).map((m) => `${m}`);
+  const suffix = mults.length > 6 ? ` +${mults.length - 6}` : "";
+  const chain = shown.length > 0 ? ` x ${shown.join(" x ")}${suffix}` : "";
+  return `1 x ${basePay.toFixed(2)}${chain}`;
 }
