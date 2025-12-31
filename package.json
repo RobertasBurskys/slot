@@ -1,0 +1,17 @@
+{
+  "name": "slot-root",
+  "private": true,
+  "scripts": {
+    "test": "tsx tests/runTests.ts",
+    "sim": "tsx sim/runSim.ts --config ./sim/workerConfig.template.ts",
+    "sim:fast": "tsx sim/runSim.ts --config ./sim/workerConfig.template.ts --spins 1000000 --bet 1",
+    "sim:deep": "tsx sim/runSim.ts --config ./sim/workerConfig.template.ts --spins 20000000 --bet 1",
+    "sim:batch": "tsx sim/runBatchSim.ts --config ./sim/workerConfig.template.ts --spins 1000000 --batches 5 --bet 1",
+    "ui:dev": "npm --prefix ui run dev",
+    "ui:build": "npm --prefix ui run build",
+    "ui:preview": "npm --prefix ui run preview"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}
